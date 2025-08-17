@@ -87,7 +87,7 @@ body{
   font-size: clamp(14px, 3.6vw, 18px); /* ← 画面幅で可変、18pxを上限に */
   background:#fff; color:#111827;
   box-shadow: inset 0 0 0 2px transparent;
-  transition: background-color .18s ease, box-shadow .18s ease, transform .05s ease;
+  transition: background-color .05s ease, box-shadow .05s ease, transform .05s ease;
 }
 .cell-zero{color:#cbd5e1; background:#fafafa}
 .cell-focus{background:#fff9db; box-shadow: inset 0 0 0 2px #f59e0b}

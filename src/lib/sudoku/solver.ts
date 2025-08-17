@@ -27,10 +27,9 @@ function pickAndRemove<T>(arr: T[]): T | undefined {
 }
 
 /**
- * 可視化対応ソルバー（MRV + バックトラック）
- * - 各反復で空きマスの候補数を評価し、候補が最少のマスから埋める
- * - 候補が尽きたら履歴を遡って別候補を試す
- * - scan / set / back イベントで進行状況を通知
+ * 可視化対応ソルバー（MRV + バックトラック, dirty最適化）
+ * - 候補キャッシュ + dirty セットで、影響範囲のみ findCandidates を再計算
+ * - scan / set / back の各フェーズで onStep を発火
  * - 一時停止・速度調整・AbortSignal に対応
  */
 export async function solveVisual(
@@ -57,20 +56,43 @@ export async function solveVisual(
     const ms = Math.max(0, Math.min(1000, getWaitMs ? getWaitMs() : 40));
     await sleep(ms);
   };
-  const snap = (b: Board): Board => (typeof structuredClone === "function" ? structuredClone(b) : JSON.parse(JSON.stringify(b)) as Board);
+  const snap = (b: Board): Board => (typeof structuredClone === "function" ? structuredClone(b) : (JSON.parse(JSON.stringify(b)) as Board));
   const aborted = () => signal?.aborted;
 
-  // ---- データ構造 ----
-  const candidates: number[][][] = Array.from({ length: 9 }, () => Array.from({ length: 9 }, () => [] as number[]));
+  // ---- データ構造（候補キャッシュ + dirty） ----
+  const candidates: (number[] | undefined)[][] = Array.from({ length: 9 }, () => Array(9).fill(undefined));
+  const dirty = new Set<string>(); // 再計算対象セル "i,j"
+
   const blanks: Coord[] = findBlanks(board);
   const history: Coord[] = [];
   let i = 0, j = 0;
+
+  const key = (r: number, c: number) => `${r},${c}`;
+
+  // 影響範囲（行・列・ボックス）の未確定セルを dirty にする
+  function markAffected(r: number, c: number) {
+    // 行
+    for (let cc = 0; cc < 9; cc++) if (board[r][cc] === 0) dirty.add(key(r, cc));
+    // 列
+    for (let rr = 0; rr < 9; rr++) if (board[rr][c] === 0) dirty.add(key(rr, c));
+    // 3x3 ボックス
+    const br = Math.floor(r / 3) * 3, bc = Math.floor(c / 3) * 3;
+    for (let rr = br; rr < br + 3; rr++) {
+      for (let cc = bc; cc < bc + 3; cc++) {
+        if (board[rr][cc] === 0) dirty.add(key(rr, cc));
+      }
+    }
+    if (board[r][c] === 0) dirty.add(key(r, c));
+  }
+
+  // 初期は全ブランクセルを dirty に
+  for (const [bi, bj] of blanks) if (board[bi][bj] === 0) dirty.add(key(bi, bj));
 
   // ---- メインループ ----
   while (true) {
     if (aborted()) throw new Error("aborted");
 
-    // 候補最少の空きマスを探す
+    // 候補最少の空きマスを探す（dirty のみ再計算）
     let minCand = Number.POSITIVE_INFINITY;
     let minBlankIndex = -1;
 
@@ -78,12 +100,16 @@ export async function solveVisual(
       const [ii, jj] = blanks[k];
       if (board[ii][jj] !== 0) continue; // 既に確定
 
-      onStep?.(ii, jj, "scan", snap(board));
-      await stepWait();
-      if (aborted()) throw new Error("aborted");
+      // dirty または未計算なら再計算（その時だけ可視化の scan を出す）
+      if (dirty.has(key(ii, jj)) || candidates[ii][jj] === undefined) {
+        onStep?.(ii, jj, "scan", snap(board));
+        await stepWait();
+        if (aborted()) throw new Error("aborted");
+        candidates[ii][jj] = findCandidates(board, ii, jj);
+        dirty.delete(key(ii, jj));
+      }
 
-      candidates[ii][jj] = findCandidates(board, ii, jj);
-      const len = candidates[ii][jj].length;
+      const len = candidates[ii][jj]!.length;
       if (len < minCand) {
         minCand = len;
         minBlankIndex = k;
@@ -96,33 +122,43 @@ export async function solveVisual(
     [i, j] = blanks[minBlankIndex];
 
     // 候補が無ければバックトラック
-    if (candidates[i][j].length === 0) {
-      let last = history.at(-1);
+    if (!candidates[i][j] || candidates[i][j]!.length === 0) {
+      let last = history.pop();
       if (!last) throw new Error("解なし");
       [i, j] = last;
 
-      while (!candidates[i][j].length) {
-        board[i][j] = 0; // 直前の仮置きを取り消し
+      while (!candidates[i][j] || candidates[i][j]!.length === 0) {
+        // 直前の仮置きを取り消し
+        board[i][j] = 0;
         onStep?.(i, j, "back", snap(board));
         await stepWait();
         if (aborted()) throw new Error("aborted");
 
-        history.pop();
-        last = history.at(-1);
+        // 取り消しの影響を周辺に反映
+        markAffected(i, j);
+        last = history.pop();
         if (!last) throw new Error("解なし");
         [i, j] = last;
       }
     }
 
     // 候補から1つ選んで配置
-    board[i][j] = pickAndRemove(candidates[i][j])!;
+    const val = pickAndRemove(candidates[i][j]!);
+    board[i][j] = val!;
     onStep?.(i, j, "set", snap(board));
     await stepWait();
     if (aborted()) throw new Error("aborted");
 
+    // 置いた影響を周辺に反映
+    markAffected(i, j);
+
     history.push([i, j]);
 
-    if (history.length === blanks.length) break; // すべて埋まった
+    // すべて埋まった
+    if (history.length === blanks.length) {
+      console.log(blanks,history);
+      break;
+    }
   }
 
   // 完成スナップショット（UI取りこぼし対策）

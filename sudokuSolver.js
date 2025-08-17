@@ -3,55 +3,97 @@
  * 問題を解く
  */
 function solve2(board) {
-    const candidates = [[], [], [], [], [], [], [], [], []];
+    // 候補キャッシュ（必要になったら埋める）
+    const candidates = Array.from({ length: 9 }, () => Array(9).fill(undefined));
+    // 影響が出たマスを再計算するためのセット
+    const dirty = new Set(); // keyは "i,j"
 
-    // 空きマスの座標を抽出
     const blanks = findBlanks(board);
     const history = [];
     let i, j;
 
+    // util: セルキー
+    const key = (i, j) => `${i},${j}`;
+
+    // util: (i,j) を基点に、同じ行・列・ボックスの未確定マスを dirty にする
+    function markAffected(i, j) {
+        // 行
+        for (let c = 0; c < 9; c++) if (board[i][c] === 0) dirty.add(key(i, c));
+        // 列
+        for (let r = 0; r < 9; r++) if (board[r][j] === 0) dirty.add(key(r, j));
+        // ボックス
+        const br = Math.floor(i / 3) * 3, bc = Math.floor(j / 3) * 3;
+        for (let r = br; r < br + 3; r++) {
+            for (let c = bc; c < bc + 3; c++) {
+                if (board[r][c] === 0) dirty.add(key(r, c));
+            }
+        }
+        // 自分自身も再計算対象に
+        if (board[i][j] === 0) dirty.add(key(i, j));
+    }
+
+    // 最初は何もキャッシュされていないので、全空きマスを dirty に
+    for (const [bi, bj] of blanks) if (board[bi][bj] === 0) dirty.add(key(bi, bj));
+
     while (true) {
         let minCand = Number.POSITIVE_INFINITY;
         let minBlankIndex = -1;
-        // 全部の空きマスの候補を算出し、候補数が最小のものを取得する
+
+        // 候補最少の空きマスを探す
         for (let k = 0; k < blanks.length; k++) {
             [i, j] = blanks[k];
-            if (board[i][j] !== 0) continue; // すでに埋まっている場合はスキップ
-            candidates[i][j] = findCandidates(board, i, j);
-            if (candidates[i][j].length < minCand) {
-                minCand = candidates[i][j].length;
-                if (minCand === 0) {
-                    break;
-                }
+            if (board[i][j] !== 0) continue;
+
+            // dirty か、まだ計算していなければ再計算
+            if (dirty.has(key(i, j)) || candidates[i][j] === undefined) {
+                candidates[i][j] = findCandidates(board, i, j);
+                dirty.delete(key(i, j));
+            }
+
+            const len = candidates[i][j].length;
+            if (len < minCand) {
+                minCand = len;
+                if (minCand === 0) break; // 破綻
                 minBlankIndex = k;
             }
         }
 
-        // 他のマスに候補がない所があればやり直す
         if (minCand === 0) {
-            board[i][j] = 0;
-            [i, j] = history.pop();
-            // 候補がなければバックトラック
-            while (isEmpty(candidates[i][j])) {
+            // 直前のセルに戻る（現在の i,j は候補0セル）
+            board[i][j] = 0;                 // 念のため取り消し（既に0なら無害）
+            const last = history.pop();
+            if (!last) throw new Error('解なし');
+            [i, j] = last;
+
+            // 直前セルの候補が尽きていればさらに戻る
+            while (!candidates[i][j].length) {
                 board[i][j] = 0;
-                [i, j] = history.pop();
+                // 取り消した影響を周辺に反映
+                markAffected(i, j);
+                const prev = history.pop();
+                if (!prev) throw new Error('解なし');
+                [i, j] = prev;
             }
         } else {
+            // 未確定が残っていなければ完成
+            if (minBlankIndex < 0) break;
             [i, j] = blanks[minBlankIndex];
         }
 
-        // 一番少ないところから一つ取って仮埋め
-        board[i][j] = pickAndRemove(candidates[i][j]);
+        // 候補から1つ選んで配置
+        const val = pickAndRemove(candidates[i][j]);
+        board[i][j] = val;
+
+        // 置いた場所の影響を周辺に反映（行・列・ボックスをdirtyに）
+        markAffected(i, j);
+
         history.push([i, j]);
 
-        if (history.length === blanks.length) {
-            //console.log(blanks, history);
-            break;
-        }
+        if (history.length === blanks.length) break;
     }
+
     return board;
 }
-
 /**
  * 問題を解く
  */
