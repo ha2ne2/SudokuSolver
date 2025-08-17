@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from "react";
+import { useRef, useState, useEffect } from "react";
 import { BoardView } from "../../ui/BoardView";
 import { generateProblem } from "../../lib/sudoku/generator";
 import { check } from "../../lib/sudoku/check";
@@ -84,7 +84,7 @@ export function SudokuSolverVisualizer({ deleteCount = 40 }: { deleteCount?: num
                     }}
                     className={`btn ${!running ? 'btn-primary' : (paused ? 'btn-success' : 'btn-secondary')}`}
                 >
-                    {!running ? "再生" : (paused ? "再開" : "停止")}
+                    {!running ? "開始" : (paused ? "再開" : "停止")}
                 </button>
 
                 <button

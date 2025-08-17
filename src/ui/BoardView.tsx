@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import { useMemo } from "react";
 import type { Board, Phase } from "../lib/sudoku/types";
 
 export function BoardView({

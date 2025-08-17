@@ -1,5 +1,5 @@
 import type { Board, Phase } from "./types";
-import { difference, intersection, isEmpty, sleep } from "./utils";
+import { difference, intersection, isEmpty } from "./utils";
 
 export type { Board, Phase };
 
